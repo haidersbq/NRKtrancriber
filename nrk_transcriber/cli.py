@@ -388,6 +388,148 @@ def monitor(ctx, channel_ids: tuple, duration: float):
     asyncio.run(run())
 
 
+@cli.command()
+@click.argument("url")
+@click.option(
+    "--model",
+    "-m",
+    type=click.Choice(["tiny", "base", "small", "medium", "large", "large-v2", "large-v3"]),
+    default="medium",
+    help="Whisper model size",
+)
+@click.option(
+    "--output-dir",
+    "-o",
+    type=click.Path(path_type=Path),
+    help="Output directory for transcriptions",
+)
+@click.option(
+    "--keep-audio",
+    is_flag=True,
+    help="Keep audio files after transcription",
+)
+@click.option(
+    "--segment-duration",
+    "-s",
+    type=int,
+    default=300,
+    help="Process in segments of N seconds (default: 300 = 5 min)",
+)
+@click.pass_context
+def download(
+    ctx,
+    url: str,
+    model: str,
+    output_dir: Optional[Path],
+    keep_audio: bool,
+    segment_duration: int,
+):
+    """
+    Download and transcribe on-demand NRK content.
+
+    URL can be a full NRK radio/podcast URL like:
+    https://radio.nrk.no/serie/distriktsprogram-telemark/sesong/202602/DKTE01002126
+
+    Supports timestamps in URL (e.g., #t=14m19s)
+    """
+    from .nrk_api import NRKApiClient
+    from .streams import NRKDownloader
+
+    config = ctx.obj["config"]
+    config.transcription.model = model
+
+    if output_dir:
+        config.storage.output_dir = output_dir
+        config.storage.transcripts_dir = output_dir / "transcripts"
+        config.storage.audio_dir = output_dir / "audio"
+    config.storage.keep_audio_files = keep_audio
+
+    async def run():
+        # Parse URL and get program info
+        api = NRKApiClient()
+
+        console.print(f"[bold]Fetching program info...[/bold]")
+
+        try:
+            parsed = api.parse_nrk_url(url)
+            program = api.get_program(url)
+        except Exception as e:
+            console.print(f"[red]Error fetching program: {e}[/red]")
+            sys.exit(1)
+
+        # Show program info
+        console.print(Panel(
+            f"[bold]Title:[/bold] {program.title}\n"
+            f"[bold]Series:[/bold] {program.series_title or 'N/A'}\n"
+            f"[bold]Duration:[/bold] {program.duration_seconds // 60}m {program.duration_seconds % 60}s\n"
+            f"[bold]Model:[/bold] {model}\n"
+            f"[bold]Output:[/bold] {config.storage.transcripts_dir}",
+            title="NRK Program",
+        ))
+
+        # Handle timestamp offset
+        start_time = parsed.get("timestamp_seconds", 0)
+        if start_time:
+            console.print(f"[yellow]Starting from {start_time // 60}m {start_time % 60}s[/yellow]")
+
+        # Download audio
+        downloader = NRKDownloader(
+            output_dir=config.storage.audio_dir,
+            sample_rate=config.stream.sample_rate,
+        )
+
+        transcriber = NRKTranscriber(config=config)
+        await transcriber.initialize()
+
+        all_text = []
+
+        try:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(),
+                console=console,
+            ) as progress:
+                # Download
+                task = progress.add_task("Downloading audio...", total=None)
+
+                audio = await downloader.download(
+                    audio_url=program.audio_url,
+                    program_id=program.program_id,
+                    title=program.title,
+                    start_time=start_time if start_time else None,
+                )
+
+                progress.update(task, description="Transcribing...")
+
+                # Transcribe
+                result = await transcriber.transcribe_file(
+                    audio.file_path,
+                    channel_id=program.program_id,
+                )
+
+                all_text.append(result.text)
+
+            # Print transcription
+            console.print("\n[green]━━━ Transcription ━━━[/green]")
+            console.print(result.text)
+
+            console.print(f"\n[bold]Duration:[/bold] {result.duration_seconds:.1f}s")
+            console.print(f"[bold]Processing time:[/bold] {result.processing_time_seconds:.1f}s")
+            console.print(f"[bold]Speed:[/bold] {result.duration_seconds / result.processing_time_seconds:.1f}x realtime")
+
+            # Cleanup audio if not keeping
+            if not keep_audio and audio.file_path.exists():
+                audio.file_path.unlink()
+
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Cancelled[/yellow]")
+        finally:
+            await transcriber.shutdown()
+
+    asyncio.run(run())
+
+
 def main():
     """Entry point."""
     cli(obj={})
