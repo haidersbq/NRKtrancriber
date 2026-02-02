@@ -256,6 +256,7 @@ class NRKTranscriber:
         self,
         audio_path: Path,
         channel_id: str = "file",
+        language: Optional[str] = None,
     ) -> TranscriptionResult:
         """
         Transcribe a local audio file.
@@ -263,12 +264,17 @@ class NRKTranscriber:
         Args:
             audio_path: Path to the audio file
             channel_id: Channel ID to associate with the transcription
+            language: Optional language override (e.g., 'no', 'en', 'sv')
 
         Returns:
             TranscriptionResult
         """
         if not self._transcriber:
             await self.initialize()
+
+        # Override language if specified
+        if language and self._transcriber:
+            self._transcriber.language = language
 
         self._transcriber.load_model()
 

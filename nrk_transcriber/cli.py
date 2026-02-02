@@ -1,5 +1,7 @@
 """
-Command-line interface for NRK Radio Transcriber.
+Command-line interface for Media Transcriber.
+
+Supports multiple media providers including NRK, direct URLs, and more.
 """
 
 import asyncio
@@ -18,6 +20,7 @@ from . import __version__
 from .config import Config
 from .transcriber import NRKTranscriber, run_transcriber
 from .utils.logging_config import setup_logging
+from .providers import ProviderRegistry, get_provider
 
 console = Console()
 
@@ -389,7 +392,39 @@ def monitor(ctx, channel_ids: tuple, duration: float):
 
 
 @cli.command()
+@click.pass_context
+def providers(ctx):
+    """List available media providers."""
+    provider_list = ProviderRegistry.list_providers()
+
+    table = Table(title="Available Media Providers")
+    table.add_column("ID", style="cyan")
+    table.add_column("Name", style="green")
+    table.add_column("Domains")
+    table.add_column("Language")
+
+    for p in provider_list:
+        domains = ", ".join(p["domains"][:3])
+        if len(p["domains"]) > 3:
+            domains += "..."
+        table.add_row(
+            p["id"],
+            p["name"],
+            domains or "(any audio URL)",
+            p["language"] or "-",
+        )
+
+    console.print(table)
+    console.print("\n[dim]Use --provider to force a specific provider[/dim]")
+
+
+@cli.command()
 @click.argument("url")
+@click.option(
+    "--provider",
+    "-p",
+    help="Force specific provider (auto-detected if not specified)",
+)
 @click.option(
     "--model",
     "-m",
@@ -415,38 +450,40 @@ def monitor(ctx, channel_ids: tuple, duration: float):
     help="Keep audio files after transcription",
 )
 @click.option(
-    "--segment-duration",
-    "-s",
-    type=int,
-    default=300,
-    help="Process in segments of N seconds (default: 300 = 5 min)",
+    "--language",
+    "-l",
+    help="Override language detection (e.g., 'en', 'no', 'sv')",
 )
 @click.pass_context
 def download(
     ctx,
     url: str,
+    provider: Optional[str],
     model: str,
     duration: Optional[int],
     output_dir: Optional[Path],
     keep_audio: bool,
-    segment_duration: int,
+    language: Optional[str],
 ):
     """
-    Download and transcribe on-demand NRK content.
+    Download and transcribe media from any supported source.
 
-    URL can be a full NRK radio/podcast URL like:
-    https://radio.nrk.no/serie/distriktsprogram-telemark/sesong/202602/DKTE01002126
-
-    Supports timestamps in URL (e.g., #t=14m19s) and --duration to limit length.
+    Supports NRK, direct audio URLs (MP3, WAV, HLS), and more.
+    Provider is auto-detected from the URL.
 
     Examples:
-      # Transcribe 20 minutes starting at 14:19
-      nrk-transcriber download "URL#t=14m19s" --duration 20
+      # NRK radio (auto-detected)
+      transcriber download "https://radio.nrk.no/serie/..."
 
-      # Quick transcribe with small model
-      nrk-transcriber download "URL" --model small --duration 5
+      # With timestamp and duration
+      transcriber download "URL#t=14m19s" --duration 20
+
+      # Direct audio file
+      transcriber download "https://example.com/audio.mp3"
+
+      # Force provider
+      transcriber download "URL" --provider direct
     """
-    from .nrk_api import NRKApiClient
     from .streams import NRKDownloader
 
     config = ctx.obj["config"]
@@ -462,31 +499,47 @@ def download(
     duration_seconds = duration * 60 if duration else None
 
     async def run():
-        # Parse URL and get program info
-        api = NRKApiClient()
-
+        # Get provider (auto-detect or forced)
         console.print(f"[bold]Fetching program info...[/bold]")
 
         try:
-            parsed = api.parse_nrk_url(url)
+            if provider:
+                api = ProviderRegistry.get_provider(provider)
+                console.print(f"[dim]Using provider: {api.PROVIDER_NAME}[/dim]")
+            else:
+                api = ProviderRegistry.detect_provider(url)
+                if not api:
+                    console.print(f"[red]Could not detect provider for URL.[/red]")
+                    console.print("Use --provider to specify one. Available providers:")
+                    for p in ProviderRegistry.list_providers():
+                        console.print(f"  - {p['id']}: {p['name']}")
+                    sys.exit(1)
+                console.print(f"[dim]Detected provider: {api.PROVIDER_NAME}[/dim]")
+
             program = api.get_program(url)
         except Exception as e:
             console.print(f"[red]Error fetching program: {e}[/red]")
             sys.exit(1)
 
         # Handle timestamp offset
-        start_time = parsed.get("timestamp_seconds", 0)
+        start_time = program.start_time_seconds or 0
 
         # Calculate what we're transcribing
-        transcribe_duration = duration_seconds if duration_seconds else (program.duration_seconds - start_time)
-        transcribe_duration_str = f"{transcribe_duration // 60}m {transcribe_duration % 60}s"
+        if program.duration_seconds > 0:
+            transcribe_duration = duration_seconds if duration_seconds else (program.duration_seconds - start_time)
+        else:
+            transcribe_duration = duration_seconds or 0
+        transcribe_duration_str = f"{transcribe_duration // 60}m {transcribe_duration % 60}s" if transcribe_duration else "unknown"
 
         # Show program info
         info_lines = [
+            f"[bold]Provider:[/bold] {api.PROVIDER_NAME}",
             f"[bold]Title:[/bold] {program.title}",
-            f"[bold]Series:[/bold] {program.series_title or 'N/A'}",
-            f"[bold]Full duration:[/bold] {program.duration_seconds // 60}m {program.duration_seconds % 60}s",
         ]
+        if program.series_title:
+            info_lines.append(f"[bold]Series:[/bold] {program.series_title}")
+        if program.duration_seconds > 0:
+            info_lines.append(f"[bold]Full duration:[/bold] {program.duration_seconds // 60}m {program.duration_seconds % 60}s")
         if start_time:
             info_lines.append(f"[bold]Start:[/bold] {start_time // 60}m {start_time % 60}s")
         if duration_seconds:
@@ -496,7 +549,7 @@ def download(
             f"[bold]Output:[/bold] {config.storage.transcripts_dir}",
         ])
 
-        console.print(Panel("\n".join(info_lines), title="NRK Program"))
+        console.print(Panel("\n".join(info_lines), title="Media Program"))
 
         # Download audio
         downloader = NRKDownloader(
@@ -506,8 +559,6 @@ def download(
 
         transcriber = NRKTranscriber(config=config)
         await transcriber.initialize()
-
-        all_text = []
 
         try:
             with Progress(
@@ -529,13 +580,13 @@ def download(
 
                 progress.update(task, description="Transcribing...")
 
-                # Transcribe
+                # Transcribe (with language override if specified)
+                transcribe_language = language or program.language or api.DEFAULT_LANGUAGE
                 result = await transcriber.transcribe_file(
                     audio.file_path,
                     channel_id=program.program_id,
+                    language=transcribe_language,
                 )
-
-                all_text.append(result.text)
 
             # Print transcription
             console.print("\n[green]━━━ Transcription ━━━[/green]")

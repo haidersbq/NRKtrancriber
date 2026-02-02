@@ -1,6 +1,10 @@
-# NRK Transcriber
+# Media Transcriber
 
-Tool for capturing and transcribing NRK (Norwegian Broadcasting Corporation) radio content using Whisper speech-to-text.
+Tool for capturing and transcribing media content from multiple sources using Whisper speech-to-text.
+
+**Supported Providers:**
+- **NRK** - Norwegian Broadcasting Corporation (radio, podcasts)
+- **Direct URLs** - Any MP3, WAV, HLS stream, or audio file
 
 ## Quick Start
 
@@ -9,16 +13,22 @@ Tool for capturing and transcribing NRK (Norwegian Broadcasting Corporation) rad
 cd ~/NRKtrancriber
 source venv/bin/activate
 
-# Transcribe on-demand content with timestamp and duration
+# Transcribe NRK content (auto-detected)
 nrk-transcriber download "https://radio.nrk.no/serie/SERIES/sesong/SEASON/EPISODE#t=XmYs" --duration 5 --model small
+
+# Transcribe direct audio URL
+nrk-transcriber download "https://example.com/audio.mp3" --model small
+
+# List available providers
+nrk-transcriber providers
 ```
 
 ## CLI Commands
 
-### Download & Transcribe On-Demand Content
+### Download & Transcribe (Any Source)
 ```bash
-# Basic usage
-nrk-transcriber download "NRK_URL"
+# NRK radio (auto-detected)
+nrk-transcriber download "https://radio.nrk.no/serie/..."
 
 # With start time (from URL fragment)
 nrk-transcriber download "https://radio.nrk.no/serie/...#t=14m19s"
@@ -26,8 +36,17 @@ nrk-transcriber download "https://radio.nrk.no/serie/...#t=14m19s"
 # Limit duration (minutes)
 nrk-transcriber download "URL#t=14m19s" --duration 3
 
+# Direct audio file
+nrk-transcriber download "https://example.com/podcast.mp3"
+
+# Force specific provider
+nrk-transcriber download "URL" --provider direct
+
 # Choose model (tiny/small/medium/large/large-v3)
 nrk-transcriber download "URL" --model small
+
+# Override language detection
+nrk-transcriber download "URL" --language en
 ```
 
 ### Live Stream Capture
@@ -35,14 +54,23 @@ nrk-transcriber download "URL" --model small
 nrk-transcriber capture p1 --duration 300  # 5 minutes of NRK P1
 ```
 
+### List Providers
+```bash
+nrk-transcriber providers
+```
+
 ## Project Structure
 
 ```
 nrk_transcriber/
 ├── cli.py                 # Click CLI interface
-├── nrk_api.py             # NRK API client (fetches metadata, stream URLs)
 ├── transcriber.py         # Main transcriber orchestration
 ├── config.py              # Configuration management
+├── providers/             # Media provider abstraction
+│   ├── base.py            # BaseProvider, MediaProgram classes
+│   ├── registry.py        # Provider auto-detection
+│   ├── nrk.py             # NRK provider
+│   └── direct.py          # Direct URL provider
 ├── streams/
 │   ├── capture.py         # Live stream capture via ffmpeg
 │   └── downloader.py      # On-demand content download
@@ -59,8 +87,10 @@ nrk_transcriber/
 
 | File | Purpose |
 |------|---------|
-| `cli.py` | Entry point, defines `download` and `capture` commands |
-| `nrk_api.py` | Parses NRK URLs, fetches program info and HLS stream URLs |
+| `cli.py` | Entry point, defines `download`, `capture`, `providers` commands |
+| `providers/base.py` | BaseProvider interface, MediaProgram dataclass |
+| `providers/nrk.py` | NRK-specific API client |
+| `providers/direct.py` | Direct audio URL handler |
 | `whisper_transcriber.py` | Loads Whisper models, transcribes audio |
 | `downloader.py` | Downloads audio segments via ffmpeg |
 | `config/channels.yaml` | NRK radio channel configurations |
@@ -126,10 +156,48 @@ ruff check nrk_transcriber/
 2. **Command not found**: Activate venv first (`source venv/bin/activate`)
 3. **Slow transcription**: Use `--model small` instead of medium/large
 
+## Adding New Providers
+
+To add a new broadcaster/source, create a provider in `providers/`:
+
+```python
+# providers/youtube.py
+from .base import BaseProvider, MediaProgram, ParsedURL
+from .registry import ProviderRegistry
+
+@ProviderRegistry.register
+class YouTubeProvider(BaseProvider):
+    PROVIDER_ID = "youtube"
+    PROVIDER_NAME = "YouTube"
+    SUPPORTED_DOMAINS = ["youtube.com", "youtu.be"]
+    DEFAULT_LANGUAGE = None
+
+    @classmethod
+    def can_handle(cls, url: str) -> bool:
+        # Check if URL matches this provider
+        ...
+
+    def parse_url(self, url: str) -> ParsedURL:
+        # Extract video ID, timestamps, etc.
+        ...
+
+    def get_program(self, url_or_id: str) -> MediaProgram:
+        # Fetch metadata and return MediaProgram
+        ...
+```
+
+Then import it in `providers/__init__.py`:
+```python
+from . import youtube  # Registers automatically via decorator
+```
+
 ## Future Improvements
 
+- [ ] YouTube provider (via yt-dlp)
+- [ ] Podcast RSS provider
+- [ ] BBC Sounds provider
+- [ ] SVT/DR Nordic broadcasters
 - [ ] `--end-time` option for precise segment selection
 - [ ] Search command across transcripts
 - [ ] Speaker diarization
-- [ ] NRK TV support
 - [ ] Auto-translate to English
