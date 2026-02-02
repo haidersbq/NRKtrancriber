@@ -398,6 +398,12 @@ def monitor(ctx, channel_ids: tuple, duration: float):
     help="Whisper model size",
 )
 @click.option(
+    "--duration",
+    "-d",
+    type=int,
+    help="Duration in minutes to transcribe (from start time)",
+)
+@click.option(
     "--output-dir",
     "-o",
     type=click.Path(path_type=Path),
@@ -420,6 +426,7 @@ def download(
     ctx,
     url: str,
     model: str,
+    duration: Optional[int],
     output_dir: Optional[Path],
     keep_audio: bool,
     segment_duration: int,
@@ -430,7 +437,14 @@ def download(
     URL can be a full NRK radio/podcast URL like:
     https://radio.nrk.no/serie/distriktsprogram-telemark/sesong/202602/DKTE01002126
 
-    Supports timestamps in URL (e.g., #t=14m19s)
+    Supports timestamps in URL (e.g., #t=14m19s) and --duration to limit length.
+
+    Examples:
+      # Transcribe 20 minutes starting at 14:19
+      nrk-transcriber download "URL#t=14m19s" --duration 20
+
+      # Quick transcribe with small model
+      nrk-transcriber download "URL" --model small --duration 5
     """
     from .nrk_api import NRKApiClient
     from .streams import NRKDownloader
@@ -443,6 +457,9 @@ def download(
         config.storage.transcripts_dir = output_dir / "transcripts"
         config.storage.audio_dir = output_dir / "audio"
     config.storage.keep_audio_files = keep_audio
+
+    # Convert duration from minutes to seconds
+    duration_seconds = duration * 60 if duration else None
 
     async def run():
         # Parse URL and get program info
@@ -457,20 +474,29 @@ def download(
             console.print(f"[red]Error fetching program: {e}[/red]")
             sys.exit(1)
 
-        # Show program info
-        console.print(Panel(
-            f"[bold]Title:[/bold] {program.title}\n"
-            f"[bold]Series:[/bold] {program.series_title or 'N/A'}\n"
-            f"[bold]Duration:[/bold] {program.duration_seconds // 60}m {program.duration_seconds % 60}s\n"
-            f"[bold]Model:[/bold] {model}\n"
-            f"[bold]Output:[/bold] {config.storage.transcripts_dir}",
-            title="NRK Program",
-        ))
-
         # Handle timestamp offset
         start_time = parsed.get("timestamp_seconds", 0)
+
+        # Calculate what we're transcribing
+        transcribe_duration = duration_seconds if duration_seconds else (program.duration_seconds - start_time)
+        transcribe_duration_str = f"{transcribe_duration // 60}m {transcribe_duration % 60}s"
+
+        # Show program info
+        info_lines = [
+            f"[bold]Title:[/bold] {program.title}",
+            f"[bold]Series:[/bold] {program.series_title or 'N/A'}",
+            f"[bold]Full duration:[/bold] {program.duration_seconds // 60}m {program.duration_seconds % 60}s",
+        ]
         if start_time:
-            console.print(f"[yellow]Starting from {start_time // 60}m {start_time % 60}s[/yellow]")
+            info_lines.append(f"[bold]Start:[/bold] {start_time // 60}m {start_time % 60}s")
+        if duration_seconds:
+            info_lines.append(f"[bold]Transcribe:[/bold] {transcribe_duration_str}")
+        info_lines.extend([
+            f"[bold]Model:[/bold] {model}",
+            f"[bold]Output:[/bold] {config.storage.transcripts_dir}",
+        ])
+
+        console.print(Panel("\n".join(info_lines), title="NRK Program"))
 
         # Download audio
         downloader = NRKDownloader(
@@ -498,6 +524,7 @@ def download(
                     program_id=program.program_id,
                     title=program.title,
                     start_time=start_time if start_time else None,
+                    duration=duration_seconds,
                 )
 
                 progress.update(task, description="Transcribing...")
