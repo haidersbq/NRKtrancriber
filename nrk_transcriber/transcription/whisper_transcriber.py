@@ -193,6 +193,7 @@ class WhisperTranscriber:
         self.initial_prompt = initial_prompt or self._get_norwegian_prompt()
 
         self._model = None
+        self._backend = None  # "faster-whisper" or "openai-whisper"
         self._loaded = False
 
     def _get_norwegian_prompt(self) -> str:

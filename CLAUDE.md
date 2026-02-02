@@ -67,14 +67,36 @@ nrk-transcriber download "URL" --model small
 nrk-transcriber download "URL" --language en
 ```
 
-### Live Stream Capture
+### Live Stream Transcription
 ```bash
-nrk-transcriber capture p1 --duration 300  # 5 minutes of NRK P1
+nrk-transcriber transcribe p1 --duration 5  # 5 minutes of NRK P1
+nrk-transcriber transcribe p2 --duration 10 --model small
 ```
 
 ### List Providers
 ```bash
 nrk-transcriber providers
+```
+
+### Other Commands
+```bash
+# List NRK channels
+nrk-transcriber channels
+
+# Transcribe local audio file
+nrk-transcriber file audio.wav --model small
+
+# View transcription history
+nrk-transcriber history --limit 10
+
+# Search transcriptions
+nrk-transcriber history --search "keyword"
+
+# View statistics
+nrk-transcriber stats
+
+# Monitor multiple channels
+nrk-transcriber monitor p1 p2 --duration 5
 ```
 
 ## Project Structure
