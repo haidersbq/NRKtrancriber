@@ -4,6 +4,8 @@ Tool for capturing and transcribing media content from multiple sources using Wh
 
 **Supported Providers:**
 - **NRK** - Norwegian Broadcasting Corporation (radio, podcasts)
+- **YouTube** - YouTube videos via yt-dlp
+- **Podcast** - Any podcast RSS feed
 - **Direct URLs** - Any MP3, WAV, HLS stream, or audio file
 
 ## Quick Start
@@ -15,6 +17,12 @@ source venv/bin/activate
 
 # Transcribe NRK content (auto-detected)
 nrk-transcriber download "https://radio.nrk.no/serie/SERIES/sesong/SEASON/EPISODE#t=XmYs" --duration 5 --model small
+
+# Transcribe YouTube video
+nrk-transcriber download "https://www.youtube.com/watch?v=VIDEO_ID" --model small
+
+# Transcribe podcast episode (RSS feed)
+nrk-transcriber download "https://feeds.example.com/podcast.rss" --model small
 
 # Transcribe direct audio URL
 nrk-transcriber download "https://example.com/audio.mp3" --model small
@@ -36,8 +44,18 @@ nrk-transcriber download "https://radio.nrk.no/serie/...#t=14m19s"
 # Limit duration (minutes)
 nrk-transcriber download "URL#t=14m19s" --duration 3
 
+# YouTube video (requires yt-dlp)
+nrk-transcriber download "https://www.youtube.com/watch?v=VIDEO_ID"
+nrk-transcriber download "https://youtu.be/VIDEO_ID?t=90" --duration 5
+
+# Podcast RSS feed (transcribes latest episode)
+nrk-transcriber download "https://feeds.example.com/podcast.rss"
+
+# Apple Podcasts (auto-resolves to RSS)
+nrk-transcriber download "https://podcasts.apple.com/podcast/id123456789"
+
 # Direct audio file
-nrk-transcriber download "https://example.com/podcast.mp3"
+nrk-transcriber download "https://example.com/audio.mp3"
 
 # Force specific provider
 nrk-transcriber download "URL" --provider direct
@@ -70,10 +88,12 @@ nrk_transcriber/
 │   ├── base.py            # BaseProvider, MediaProgram classes
 │   ├── registry.py        # Provider auto-detection
 │   ├── nrk.py             # NRK provider
+│   ├── youtube.py         # YouTube provider (yt-dlp)
+│   ├── podcast.py         # Podcast RSS provider
 │   └── direct.py          # Direct URL provider
 ├── streams/
 │   ├── capture.py         # Live stream capture via ffmpeg
-│   └── downloader.py      # On-demand content download
+│   └── downloader.py      # On-demand content download (ffmpeg + yt-dlp)
 ├── transcription/
 │   └── whisper_transcriber.py  # Whisper integration (faster-whisper)
 ├── storage/
@@ -90,9 +110,11 @@ nrk_transcriber/
 | `cli.py` | Entry point, defines `download`, `capture`, `providers` commands |
 | `providers/base.py` | BaseProvider interface, MediaProgram dataclass |
 | `providers/nrk.py` | NRK-specific API client |
+| `providers/youtube.py` | YouTube via yt-dlp |
+| `providers/podcast.py` | Podcast RSS feed parser |
 | `providers/direct.py` | Direct audio URL handler |
 | `whisper_transcriber.py` | Loads Whisper models, transcribes audio |
-| `downloader.py` | Downloads audio segments via ffmpeg |
+| `downloader.py` | Downloads audio (ffmpeg + yt-dlp) |
 | `config/channels.yaml` | NRK radio channel configurations |
 
 ## NRK URL Format
@@ -134,7 +156,14 @@ Database at `output/transcriptions.db`.
 
 - **faster-whisper**: Primary transcription engine (CTranslate2-based)
 - **ffmpeg**: Required for audio capture/conversion (install via `brew install ffmpeg`)
+- **yt-dlp**: Required for YouTube support (`pip install yt-dlp`)
 - **Python 3.10+**: Required
+
+### Optional Extras
+```bash
+pip install -e ".[youtube]"  # YouTube support (yt-dlp)
+pip install -e ".[all]"      # All optional features
+```
 
 ## Development
 
@@ -193,8 +222,8 @@ from . import youtube  # Registers automatically via decorator
 
 ## Future Improvements
 
-- [ ] YouTube provider (via yt-dlp)
-- [ ] Podcast RSS provider
+- [x] YouTube provider (via yt-dlp)
+- [x] Podcast RSS provider
 - [ ] BBC Sounds provider
 - [ ] SVT/DR Nordic broadcasters
 - [ ] `--end-time` option for precise segment selection

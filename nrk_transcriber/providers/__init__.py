@@ -7,11 +7,11 @@ a unified way to fetch and transcribe content from different sources.
 Supported providers:
 - NRK: Norwegian Broadcasting Corporation (radio, podcasts)
 - Direct: Direct audio URLs (MP3, WAV, HLS, etc.)
+- YouTube: YouTube videos via yt-dlp
+- Podcast: Generic podcast RSS feeds
 
 Coming soon:
-- YouTube: Via yt-dlp
 - BBC: BBC Sounds
-- Podcast: Generic RSS feeds
 - SVT: Swedish Television
 - DR: Danish Broadcasting
 """
@@ -22,6 +22,8 @@ from .registry import ProviderRegistry
 # Import providers to register them
 from . import nrk
 from . import direct
+from . import youtube
+from . import podcast
 
 __all__ = [
     "BaseProvider",

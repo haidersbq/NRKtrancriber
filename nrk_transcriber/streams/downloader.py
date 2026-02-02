@@ -1,19 +1,22 @@
 """
-Download on-demand NRK audio content.
+Download on-demand audio content from various sources.
 
-Handles both HLS streams and direct audio files.
+Handles HLS streams, direct audio files, and YouTube via yt-dlp.
 """
 
 import asyncio
 import logging
-import subprocess
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+# YouTube domains for yt-dlp routing
+YOUTUBE_DOMAINS = {"youtube.com", "www.youtube.com", "youtu.be", "m.youtube.com"}
 
 
 @dataclass
@@ -80,6 +83,18 @@ class NRKDownloader:
 
         return cmd
 
+    def _is_youtube_url(self, url: str) -> bool:
+        """Check if URL is from YouTube."""
+        try:
+            parsed = urlparse(url)
+            domain = parsed.netloc.lower()
+            return any(
+                domain == d or domain.endswith(f".{d}")
+                for d in YOUTUBE_DOMAINS
+            )
+        except Exception:
+            return False
+
     async def download(
         self,
         audio_url: str,
@@ -89,11 +104,13 @@ class NRKDownloader:
         duration: Optional[int] = None,
     ) -> DownloadedAudio:
         """
-        Download audio from NRK.
+        Download audio from any supported source.
+
+        Automatically routes YouTube URLs to yt-dlp, others to ffmpeg.
 
         Args:
-            audio_url: URL to the audio stream (HLS or direct)
-            program_id: NRK program ID for naming
+            audio_url: URL to the audio stream (HLS, direct, or YouTube)
+            program_id: Program ID for naming
             title: Program title
             start_time: Start offset in seconds
             duration: Duration to download in seconds (None for full)
@@ -101,6 +118,26 @@ class NRKDownloader:
         Returns:
             DownloadedAudio with file path and metadata
         """
+        # Route YouTube URLs to yt-dlp
+        if self._is_youtube_url(audio_url):
+            return await self._download_with_ytdlp(
+                audio_url, program_id, title, start_time, duration
+            )
+
+        # Use ffmpeg for everything else
+        return await self._download_with_ffmpeg(
+            audio_url, program_id, title, start_time, duration
+        )
+
+    async def _download_with_ffmpeg(
+        self,
+        audio_url: str,
+        program_id: str,
+        title: str = "",
+        start_time: Optional[int] = None,
+        duration: Optional[int] = None,
+    ) -> DownloadedAudio:
+        """Download audio using ffmpeg (for HLS, direct URLs)."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = self.output_dir / f"{program_id}_{timestamp}.wav"
 
@@ -137,6 +174,125 @@ class NRKDownloader:
             raise RuntimeError(f"Failed to download audio: {error_msg}")
 
         # Get actual duration from the downloaded file
+        actual_duration = await self._get_audio_duration(output_path)
+
+        logger.info(f"Downloaded {actual_duration:.1f}s of audio in {download_time:.1f}s")
+
+        return DownloadedAudio(
+            program_id=program_id,
+            file_path=output_path,
+            duration_seconds=actual_duration,
+            title=title,
+            download_time_seconds=download_time,
+        )
+
+    async def _download_with_ytdlp(
+        self,
+        url: str,
+        program_id: str,
+        title: str = "",
+        start_time: Optional[int] = None,
+        duration: Optional[int] = None,
+    ) -> DownloadedAudio:
+        """
+        Download audio from YouTube using yt-dlp.
+
+        Args:
+            url: YouTube URL
+            program_id: Video ID for naming
+            title: Video title
+            start_time: Start offset in seconds (applied post-download)
+            duration: Duration to extract in seconds (applied post-download)
+
+        Returns:
+            DownloadedAudio with file path and metadata
+        """
+        if not shutil.which("yt-dlp"):
+            raise RuntimeError("yt-dlp not found. Install with: pip install yt-dlp")
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        temp_path = self.output_dir / f"{program_id}_{timestamp}_temp.%(ext)s"
+        output_path = self.output_dir / f"{program_id}_{timestamp}.wav"
+
+        logger.info(f"Downloading from YouTube: {title or program_id}")
+
+        # First, download audio with yt-dlp
+        ytdlp_cmd = [
+            "yt-dlp",
+            "-x",  # Extract audio only
+            "--audio-format", "wav",
+            "--audio-quality", "0",  # Best quality
+            "-o", str(temp_path),
+            "--no-playlist",  # Don't download playlists
+            "--no-warnings",
+            url,
+        ]
+
+        logger.debug(f"yt-dlp command: {' '.join(ytdlp_cmd)}")
+
+        start = datetime.now()
+
+        process = await asyncio.create_subprocess_exec(
+            *ytdlp_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            error_msg = stderr.decode() if stderr else "Unknown error"
+            logger.error(f"yt-dlp failed: {error_msg}")
+            raise RuntimeError(f"Failed to download from YouTube: {error_msg}")
+
+        # Find the downloaded file (yt-dlp replaces %(ext)s)
+        temp_files = list(self.output_dir.glob(f"{program_id}_{timestamp}_temp.*"))
+        if not temp_files:
+            raise RuntimeError("yt-dlp did not create output file")
+        downloaded_file = temp_files[0]
+
+        # Convert to proper format and apply trimming if needed
+        if start_time or duration or downloaded_file.suffix != ".wav":
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", str(downloaded_file),
+            ]
+
+            if start_time:
+                ffmpeg_cmd.extend(["-ss", str(start_time)])
+                logger.info(f"  Starting at {start_time}s")
+
+            if duration:
+                ffmpeg_cmd.extend(["-t", str(duration)])
+                logger.info(f"  Duration: {duration}s")
+
+            ffmpeg_cmd.extend([
+                "-vn",
+                "-acodec", "pcm_s16le",
+                "-ar", str(self.sample_rate),
+                "-ac", "1",
+                "-f", "wav",
+                str(output_path),
+            ])
+
+            process = await asyncio.create_subprocess_exec(
+                *ffmpeg_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            await process.communicate()
+
+            # Clean up temp file
+            downloaded_file.unlink(missing_ok=True)
+        else:
+            # Just rename if no processing needed
+            downloaded_file.rename(output_path)
+
+        download_time = (datetime.now() - start).total_seconds()
+
+        # Get actual duration
         actual_duration = await self._get_audio_duration(output_path)
 
         logger.info(f"Downloaded {actual_duration:.1f}s of audio in {download_time:.1f}s")
