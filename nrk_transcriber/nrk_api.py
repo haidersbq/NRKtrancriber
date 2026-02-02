@@ -205,8 +205,17 @@ class NRKApiClient:
         titles = metadata.get("titles", {})
         duration = metadata.get("duration", "PT0S")
 
-        # Parse ISO 8601 duration (PT30M45S -> seconds)
-        duration_seconds = self._parse_duration(duration)
+        # Handle duration - could be string or dict
+        if isinstance(duration, dict):
+            # Some NRK APIs return {"seconds": 1234}
+            duration_seconds = duration.get("seconds", 0)
+        elif isinstance(duration, str):
+            # Parse ISO 8601 duration (PT30M45S -> seconds)
+            duration_seconds = self._parse_duration(duration)
+        elif isinstance(duration, (int, float)):
+            duration_seconds = int(duration)
+        else:
+            duration_seconds = 0
 
         return NRKProgram(
             program_id=program_id,
