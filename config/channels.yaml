@@ -1,0 +1,154 @@
+# NRK Radio Channels Configuration
+# Stream URLs are based on NRK's public streaming infrastructure
+
+channels:
+  # Main radio channels
+  nrk_p1:
+    name: "NRK P1"
+    description: "Norway's main radio channel"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p1_ostlandssendansen_mp3_h"
+    hls_url: "https://nrk-p1.akamaized.net/hls/live/2027364/nrk_radio_p1_ostlandssendansen/master.m3u8"
+    category: "mainstream"
+    language: "nb"  # Norwegian Bokmål
+
+  nrk_p2:
+    name: "NRK P2"
+    description: "Culture and classical music"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p2_mp3_h"
+    hls_url: "https://nrk-p2.akamaized.net/hls/live/2027365/nrk_radio_p2/master.m3u8"
+    category: "culture"
+    language: "nb"
+
+  nrk_p3:
+    name: "NRK P3"
+    description: "Youth and contemporary music"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p3_mp3_h"
+    hls_url: "https://nrk-p3.akamaized.net/hls/live/2027366/nrk_radio_p3/master.m3u8"
+    category: "youth"
+    language: "nb"
+
+  nrk_p1_pluss:
+    name: "NRK P1+"
+    description: "Adult contemporary"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p1pluss_mp3_h"
+    hls_url: "https://nrk-p1pluss.akamaized.net/hls/live/2027367/nrk_radio_p1pluss/master.m3u8"
+    category: "adult"
+    language: "nb"
+
+  nrk_p13:
+    name: "NRK P13"
+    description: "Alternative and indie music"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p13_mp3_h"
+    hls_url: "https://nrk-p13.akamaized.net/hls/live/2027368/nrk_radio_p13/master.m3u8"
+    category: "alternative"
+    language: "nb"
+
+  nrk_mp3:
+    name: "NRK mP3"
+    description: "Electronic and dance music"
+    stream_url: "https://lyd.nrk.no/nrk_radio_mp3_mp3_h"
+    hls_url: "https://nrk-mp3.akamaized.net/hls/live/2027369/nrk_radio_mp3/master.m3u8"
+    category: "electronic"
+    language: "nb"
+
+  nrk_klassisk:
+    name: "NRK Klassisk"
+    description: "Classical music 24/7"
+    stream_url: "https://lyd.nrk.no/nrk_radio_klassisk_mp3_h"
+    hls_url: "https://nrk-klassisk.akamaized.net/hls/live/2027370/nrk_radio_klassisk/master.m3u8"
+    category: "classical"
+    language: "nb"
+
+  nrk_jazz:
+    name: "NRK Jazz"
+    description: "Jazz music 24/7"
+    stream_url: "https://lyd.nrk.no/nrk_radio_jazz_mp3_h"
+    hls_url: "https://nrk-jazz.akamaized.net/hls/live/2027371/nrk_radio_jazz/master.m3u8"
+    category: "jazz"
+    language: "nb"
+
+  nrk_folkemusikk:
+    name: "NRK Folkemusikk"
+    description: "Norwegian folk music"
+    stream_url: "https://lyd.nrk.no/nrk_radio_folkemusikk_mp3_h"
+    hls_url: "https://nrk-folkemusikk.akamaized.net/hls/live/2027372/nrk_radio_folkemusikk/master.m3u8"
+    category: "folk"
+    language: "nb"
+
+  nrk_sport:
+    name: "NRK Sport"
+    description: "Sports coverage"
+    stream_url: "https://lyd.nrk.no/nrk_radio_sport_mp3_h"
+    hls_url: "https://nrk-sport.akamaized.net/hls/live/2027373/nrk_radio_sport/master.m3u8"
+    category: "sports"
+    language: "nb"
+
+  nrk_nyheter:
+    name: "NRK Nyheter"
+    description: "24/7 News"
+    stream_url: "https://lyd.nrk.no/nrk_radio_nyheter_mp3_h"
+    hls_url: "https://nrk-nyheter.akamaized.net/hls/live/2027374/nrk_radio_alltid_nyheter/master.m3u8"
+    category: "news"
+    language: "nb"
+
+  nrk_sapmi:
+    name: "NRK Sápmi"
+    description: "Sami language programming"
+    stream_url: "https://lyd.nrk.no/nrk_radio_sapmi_mp3_h"
+    hls_url: "https://nrk-sapmi.akamaized.net/hls/live/2027375/nrk_radio_sapmi/master.m3u8"
+    category: "sami"
+    language: "se"  # Northern Sami
+
+  nrk_super:
+    name: "NRK Super"
+    description: "Children's programming"
+    stream_url: "https://lyd.nrk.no/nrk_radio_super_mp3_h"
+    hls_url: "https://nrk-super.akamaized.net/hls/live/2027376/nrk_radio_super/master.m3u8"
+    category: "children"
+    language: "nb"
+
+# Regional P1 channels
+regional:
+  nrk_p1_ostfold:
+    name: "NRK P1 Østfold"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p1_ostfold_mp3_h"
+    region: "ostfold"
+
+  nrk_p1_buskerud:
+    name: "NRK P1 Buskerud"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p1_buskerud_mp3_h"
+    region: "buskerud"
+
+  nrk_p1_hedmark_oppland:
+    name: "NRK P1 Hedmark og Oppland"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p1_hedmark_og_oppland_mp3_h"
+    region: "hedmark_oppland"
+
+  nrk_p1_trondelag:
+    name: "NRK P1 Trøndelag"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p1_trondelag_mp3_h"
+    region: "trondelag"
+
+  nrk_p1_nordland:
+    name: "NRK P1 Nordland"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p1_nordland_mp3_h"
+    region: "nordland"
+
+  nrk_p1_troms:
+    name: "NRK P1 Troms"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p1_troms_mp3_h"
+    region: "troms"
+
+  nrk_p1_finnmark:
+    name: "NRK P1 Finnmark"
+    stream_url: "https://lyd.nrk.no/nrk_radio_p1_finnmark_mp3_h"
+    region: "finnmark"
+
+# Default settings
+defaults:
+  chunk_duration_seconds: 30
+  overlap_seconds: 2
+  audio_format: "mp3"
+  sample_rate: 16000
+  whisper_model: "medium"
+  language: "no"  # Norwegian for Whisper
