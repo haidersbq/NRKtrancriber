@@ -7,15 +7,11 @@ Optimized for Norwegian language transcription.
 
 import asyncio
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Union
 import json
-
-# Prevent OpenMP crash when multiple libraries (torch, ctranslate2) each bundle libiomp5
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 logger = logging.getLogger(__name__)
 
@@ -240,15 +236,19 @@ class WhisperTranscriber:
         )
 
     def _resolve_device(self) -> str:
-        """Resolve the device to use."""
+        """Resolve the device to use for transcription.
+
+        Uses ctranslate2's own device detection instead of importing torch,
+        since faster-whisper is built on ctranslate2, not torch.
+        """
         if self.device != "auto":
             return self.device
 
         try:
-            import torch
-            if torch.cuda.is_available():
+            import ctranslate2
+            if "cuda" in ctranslate2.get_supported_compute_types("cuda"):
                 return "cuda"
-        except ImportError:
+        except Exception:
             pass
 
         return "cpu"

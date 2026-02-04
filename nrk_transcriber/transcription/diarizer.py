@@ -98,10 +98,29 @@ class SpeakerDiarizer:
 
         return "cpu"
 
+    def _check_torch_numpy_compat(self) -> None:
+        """Check that torch and numpy versions are compatible."""
+        try:
+            import numpy as np
+            np_major = int(np.__version__.split(".")[0])
+            if np_major >= 2:
+                import torch
+                torch_version = tuple(int(x) for x in torch.__version__.split(".")[:2])
+                if torch_version < (2, 4):
+                    raise RuntimeError(
+                        f"torch {torch.__version__} is incompatible with numpy {np.__version__}. "
+                        f"Fix with: pip install 'numpy<2'\n"
+                        f"(PyTorch < 2.4 requires NumPy 1.x)"
+                    )
+        except ImportError:
+            pass
+
     def load_model(self) -> None:
         """Load the pyannote diarization pipeline."""
         if self._loaded:
             return
+
+        self._check_torch_numpy_compat()
 
         try:
             from pyannote.audio import Pipeline
