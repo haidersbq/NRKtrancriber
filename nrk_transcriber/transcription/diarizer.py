@@ -124,6 +124,21 @@ class SpeakerDiarizer:
         # 3. Check torch/numpy compatibility
         self._check_torch_numpy_compat()
 
+    @staticmethod
+    def _auth_kwarg(token: str) -> dict:
+        """Return the correct auth keyword for the installed pyannote version.
+
+        Older pyannote.audio uses ``use_auth_token``, newer versions use ``token``.
+        Try the new name first, fall back to the old one.
+        """
+        import inspect
+        from pyannote.audio import Pipeline
+
+        sig = inspect.signature(Pipeline.from_pretrained)
+        if "token" in sig.parameters:
+            return {"token": token}
+        return {"use_auth_token": token}
+
     def _check_torch_numpy_compat(self) -> None:
         """Check that torch and numpy versions are compatible."""
         try:
@@ -165,7 +180,7 @@ class SpeakerDiarizer:
 
         self._pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
-            token=token,
+            **self._auth_kwarg(token),
         )
 
         if device != "cpu":
