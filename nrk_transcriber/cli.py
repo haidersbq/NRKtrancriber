@@ -15,6 +15,8 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
+from rich.prompt import Prompt, Confirm
+
 from . import __version__
 from .config import Config
 from .transcriber import NRKTranscriber, run_transcriber
@@ -23,8 +25,239 @@ from .providers import ProviderRegistry, get_provider
 
 console = Console()
 
+MODELS = {
+    "1": "tiny",
+    "2": "small",
+    "3": "medium",
+    "4": "large-v3",
+}
 
-@click.group()
+
+def _interactive_mode(ctx):
+    """Interactive mode - prompts the user step by step."""
+    config = ctx.obj["config"]
+
+    # Welcome
+    console.print()
+    console.print(Panel(
+        "[bold]Media Transcriber[/bold]\n"
+        "Transcribe audio from URLs, files, or live streams.\n"
+        "Supports NRK, YouTube, podcasts, and direct audio links.",
+        border_style="blue",
+    ))
+
+    # Step 1: Get URL or file path
+    console.print()
+    source = Prompt.ask(
+        "[bold cyan]Paste a URL or file path[/bold cyan]"
+    ).strip()
+
+    if not source:
+        console.print("[red]No input provided.[/red]")
+        return
+
+    # Check if it's a local file
+    source_path = Path(source)
+    is_local_file = source_path.exists() and source_path.is_file()
+
+    if is_local_file:
+        console.print(f"[dim]Local file detected: {source_path.name}[/dim]")
+    else:
+        # Try to detect provider
+        api = ProviderRegistry.detect_provider(source)
+        if api:
+            console.print(f"[dim]Detected provider: {api.PROVIDER_NAME}[/dim]")
+        else:
+            console.print("[yellow]Could not auto-detect provider. Will try as direct URL.[/yellow]")
+
+    # Step 2: Model selection
+    console.print()
+    console.print("[bold cyan]Choose model:[/bold cyan]")
+    console.print("  [dim]1[/dim] tiny    - fastest, lower quality")
+    console.print("  [dim]2[/dim] small   - good balance")
+    console.print("  [dim]3[/dim] medium  - high quality (default)")
+    console.print("  [dim]4[/dim] large   - best quality, slowest")
+    model_choice = Prompt.ask(
+        "  Select",
+        choices=["1", "2", "3", "4"],
+        default="3",
+        show_choices=False,
+    )
+    model = MODELS[model_choice]
+    console.print(f"[dim]  Using model: {model}[/dim]")
+
+    # Step 3: Duration (only for URLs, not local files)
+    duration_minutes = None
+    if not is_local_file:
+        console.print()
+        dur_input = Prompt.ask(
+            "[bold cyan]Duration in minutes[/bold cyan] [dim](Enter for full)[/dim]",
+            default="",
+            show_default=False,
+        )
+        if dur_input.strip():
+            try:
+                duration_minutes = int(dur_input.strip())
+            except ValueError:
+                console.print("[yellow]Invalid number, transcribing full content.[/yellow]")
+
+    # Step 4: Speaker diarization
+    console.print()
+    diarize = Confirm.ask(
+        "[bold cyan]Identify different speakers?[/bold cyan]",
+        default=False,
+    )
+
+    # Step 5: Language override
+    console.print()
+    lang_input = Prompt.ask(
+        "[bold cyan]Language[/bold cyan] [dim](Enter for auto, e.g. 'no', 'en')[/dim]",
+        default="",
+        show_default=False,
+    )
+    language = lang_input.strip() if lang_input.strip() else None
+
+    # Summary
+    console.print()
+    summary_lines = [f"[bold]Source:[/bold] {source}"]
+    summary_lines.append(f"[bold]Model:[/bold] {model}")
+    if duration_minutes:
+        summary_lines.append(f"[bold]Duration:[/bold] {duration_minutes} min")
+    if diarize:
+        summary_lines.append(f"[bold]Speakers:[/bold] enabled")
+    if language:
+        summary_lines.append(f"[bold]Language:[/bold] {language}")
+    console.print(Panel("\n".join(summary_lines), title="Ready to transcribe", border_style="green"))
+
+    console.print()
+    if not Confirm.ask("[bold]Start transcription?[/bold]", default=True):
+        console.print("[yellow]Cancelled.[/yellow]")
+        return
+
+    # Run transcription
+    config.transcription.model = model
+
+    if is_local_file:
+        _run_local_transcription(config, source_path, model, diarize, language)
+    else:
+        _run_url_transcription(config, source, model, duration_minutes, diarize, language)
+
+
+def _run_local_transcription(config, audio_file, model, diarize, language):
+    """Run transcription on a local file (called from interactive mode)."""
+    async def run():
+        transcriber = NRKTranscriber(config=config)
+        try:
+            await transcriber.initialize()
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(),
+                console=console,
+            ) as progress:
+                desc = "Transcribing + diarizing..." if diarize else "Transcribing..."
+                progress.add_task(desc, total=None)
+                result = await transcriber.transcribe_file(
+                    audio_file, diarize=diarize,
+                    language=language,
+                )
+
+            console.print("\n[green]━━━ Transcription ━━━[/green]")
+            if result.has_speakers:
+                console.print(result.to_speaker_text())
+            else:
+                console.print(result.text)
+
+            console.print(f"\n[bold]Language:[/bold] {result.language} ({result.language_probability:.1%})")
+            console.print(f"[bold]Duration:[/bold] {result.duration_seconds:.1f}s")
+            console.print(f"[bold]Processing time:[/bold] {result.processing_time_seconds:.1f}s")
+            console.print(f"[bold]Speed:[/bold] {result.duration_seconds / result.processing_time_seconds:.1f}x realtime")
+        finally:
+            await transcriber.shutdown()
+
+    asyncio.run(run())
+
+
+def _run_url_transcription(config, url, model, duration_minutes, diarize, language):
+    """Run transcription on a URL (called from interactive mode)."""
+    from .streams import NRKDownloader
+
+    duration_seconds = duration_minutes * 60 if duration_minutes else None
+
+    async def run():
+        # Detect provider
+        api = ProviderRegistry.detect_provider(url)
+        if not api:
+            # Fall back to direct provider
+            api = ProviderRegistry.get_provider("direct")
+
+        try:
+            program = api.get_program(url)
+        except Exception as e:
+            console.print(f"[red]Error fetching program: {e}[/red]")
+            return
+
+        start_time = program.start_time_seconds or 0
+        transcribe_language = language or program.language or api.DEFAULT_LANGUAGE
+
+        # Download and transcribe
+        downloader = NRKDownloader(
+            output_dir=config.storage.audio_dir,
+            sample_rate=config.stream.sample_rate,
+        )
+        transcriber = NRKTranscriber(config=config)
+        await transcriber.initialize()
+
+        try:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Downloading audio...", total=None)
+
+                audio = await downloader.download(
+                    audio_url=program.audio_url,
+                    program_id=program.program_id,
+                    title=program.title,
+                    start_time=start_time if start_time else None,
+                    duration=duration_seconds,
+                )
+
+                desc = "Transcribing + diarizing..." if diarize else "Transcribing..."
+                progress.update(task, description=desc)
+
+                result = await transcriber.transcribe_file(
+                    audio.file_path,
+                    channel_id=program.program_id,
+                    language=transcribe_language,
+                    diarize=diarize,
+                )
+
+            console.print("\n[green]━━━ Transcription ━━━[/green]")
+            if result.has_speakers:
+                console.print(result.to_speaker_text())
+            else:
+                console.print(result.text)
+
+            console.print(f"\n[bold]Duration:[/bold] {result.duration_seconds:.1f}s")
+            console.print(f"[bold]Processing time:[/bold] {result.processing_time_seconds:.1f}s")
+            console.print(f"[bold]Speed:[/bold] {result.duration_seconds / result.processing_time_seconds:.1f}x realtime")
+
+            # Cleanup audio
+            if audio.file_path.exists():
+                audio.file_path.unlink()
+
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Cancelled[/yellow]")
+        finally:
+            await transcriber.shutdown()
+
+    asyncio.run(run())
+
+
+@click.group(invoke_without_command=True)
 @click.version_option(version=__version__, prog_name="nrk-transcriber")
 @click.option(
     "--config-dir",
@@ -45,9 +278,9 @@ console = Console()
 @click.pass_context
 def cli(ctx, config_dir: Optional[Path], log_level: str, log_file: Optional[Path]):
     """
-    NRK Radio Transcriber - Capture and transcribe NRK radio streams.
+    Media Transcriber - Transcribe audio from NRK, YouTube, podcasts, and more.
 
-    Uses Whisper for accurate Norwegian speech recognition.
+    Run without arguments for interactive mode, or use a subcommand.
     """
     ctx.ensure_object(dict)
 
@@ -56,6 +289,10 @@ def cli(ctx, config_dir: Optional[Path], log_level: str, log_file: Optional[Path
 
     # Load configuration
     ctx.obj["config"] = Config.load(config_dir)
+
+    # If no subcommand given, launch interactive mode
+    if ctx.invoked_subcommand is None:
+        _interactive_mode(ctx)
 
 
 @cli.command()
