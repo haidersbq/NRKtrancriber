@@ -253,26 +253,38 @@ class MultiStreamCapture:
         Yields:
             AudioChunk objects from all channels as they are captured
         """
-        async def capture_channel(channel_id: str, capture: StreamCapture):
-            async for chunk in capture.capture_continuous(
-                max_chunks=max_chunks,
-                callback=callback,
-            ):
-                yield chunk
+        queue: asyncio.Queue[Optional[AudioChunk]] = asyncio.Queue()
+        num_channels = len(self.captures)
 
-        # Create tasks for all channels
+        async def capture_channel(channel_id: str, capture: StreamCapture):
+            try:
+                async for chunk in capture.capture_continuous(
+                    max_chunks=max_chunks,
+                    callback=callback,
+                ):
+                    await queue.put(chunk)
+            finally:
+                await queue.put(None)  # Sentinel to signal this channel is done
+
+        # Start all channel captures as concurrent tasks
         tasks = [
-            capture_channel(channel_id, capture)
+            asyncio.create_task(capture_channel(channel_id, capture))
             for channel_id, capture in self.captures.items()
         ]
 
-        # Merge all iterators
-        for task in asyncio.as_completed([asyncio.create_task(t.__anext__()) for t in tasks]):
-            try:
-                chunk = await task
-                yield chunk
-            except StopAsyncIteration:
-                continue
+        # Yield chunks as they arrive from any channel
+        finished_channels = 0
+        try:
+            while finished_channels < num_channels:
+                chunk = await queue.get()
+                if chunk is None:
+                    finished_channels += 1
+                else:
+                    yield chunk
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def stop_all(self) -> None:
         """Stop all captures."""

@@ -544,8 +544,7 @@ def history(ctx, channel: Optional[str], search: Optional[str], limit: int):
         elif channel:
             results = await db.get_transcriptions_by_channel(channel, limit=limit)
         else:
-            # Get all recent
-            results = await db.get_transcriptions_by_channel("", limit=limit)
+            results = await db.get_recent_transcriptions(limit=limit)
 
         if not results:
             console.print("[yellow]No transcriptions found.[/yellow]")

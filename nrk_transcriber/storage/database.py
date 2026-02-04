@@ -204,6 +204,30 @@ class TranscriptionDatabase:
             result = await session.execute(stmt)
             return list(result.scalars().all())
 
+    async def get_recent_transcriptions(
+        self,
+        limit: int = 100,
+    ) -> list[Transcription]:
+        """
+        Get recent transcriptions across all channels.
+
+        Args:
+            limit: Maximum number of results
+
+        Returns:
+            List of Transcription records ordered by most recent first
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        async with self._session_factory() as session:
+            query = select(Transcription).order_by(
+                Transcription.audio_start_time.desc()
+            ).limit(limit)
+
+            result = await session.execute(query)
+            return list(result.scalars().all())
+
     async def get_latest_transcription(
         self,
         channel_id: Optional[str] = None,
