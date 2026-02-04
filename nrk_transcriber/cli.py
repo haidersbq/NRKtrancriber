@@ -32,6 +32,33 @@ from .providers import ProviderRegistry, get_provider
 
 console = Console()
 
+
+def _check_diarization_prerequisites() -> bool:
+    """Check diarization prerequisites and print helpful errors. Returns True if OK."""
+    from .transcription.diarizer import check_diarization_ready
+
+    ok, message = check_diarization_ready()
+    if not ok:
+        console.print(f"\n[red]Diarization cannot proceed:[/red] {message}")
+        if "HF_TOKEN" in message or "HuggingFace token" in message:
+            console.print(
+                "\n[yellow]To fix:[/yellow]\n"
+                "  1. Get a free token at https://huggingface.co/settings/tokens\n"
+                "  2. Accept model terms at https://huggingface.co/pyannote/speaker-diarization-3.1\n"
+                "  3. Run: export HF_TOKEN=\"hf_your_token_here\"\n"
+                "  4. Then retry your command."
+            )
+        elif "pyannote" in message:
+            console.print(
+                "\n[yellow]To fix:[/yellow] pip install 'nrk-transcriber[diarize]'"
+            )
+        elif "numpy" in message.lower() or "torch" in message.lower():
+            console.print(
+                "\n[yellow]To fix:[/yellow] pip install 'numpy<2'"
+            )
+        return False
+    return True
+
 MODELS = {
     "1": "tiny",
     "2": "small",
@@ -114,6 +141,9 @@ def _interactive_mode(ctx):
         "[bold cyan]Identify different speakers?[/bold cyan]",
         default=False,
     )
+
+    if diarize and not _check_diarization_prerequisites():
+        return
 
     # Step 5: Language override
     console.print()
@@ -478,6 +508,10 @@ def file(ctx, audio_file: Path, model: str, output: Optional[Path], format: tupl
     config.transcription.model = model
     config.storage.export_formats = list(format)
 
+    # Validate diarization prerequisites BEFORE transcribing
+    if diarize and not _check_diarization_prerequisites():
+        sys.exit(1)
+
     console.print(f"[bold]Transcribing:[/bold] {audio_file}")
     console.print(f"[bold]Model:[/bold] {model}")
     if diarize:
@@ -755,6 +789,10 @@ def download(
         config.storage.transcripts_dir = output_dir / "transcripts"
         config.storage.audio_dir = output_dir / "audio"
     config.storage.keep_audio_files = keep_audio
+
+    # Validate diarization prerequisites BEFORE downloading/transcribing
+    if diarize and not _check_diarization_prerequisites():
+        sys.exit(1)
 
     # Convert duration from minutes to seconds
     duration_seconds = duration * 60 if duration else None

@@ -98,6 +98,32 @@ class SpeakerDiarizer:
 
         return "cpu"
 
+    def validate_prerequisites(self) -> None:
+        """Validate that all prerequisites for diarization are met.
+
+        Call this BEFORE starting a long transcription to fail fast
+        instead of wasting 15+ minutes only to crash at the end.
+
+        Raises:
+            ImportError: If pyannote.audio is not installed
+            ValueError: If HuggingFace token is not available
+            RuntimeError: If torch/numpy versions are incompatible
+        """
+        # 1. Check pyannote.audio is installed
+        try:
+            import pyannote.audio  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "pyannote.audio is required for speaker diarization. "
+                "Install it with: pip install 'nrk-transcriber[diarize]'"
+            )
+
+        # 2. Check HuggingFace token is available
+        self._resolve_token()
+
+        # 3. Check torch/numpy compatibility
+        self._check_torch_numpy_compat()
+
     def _check_torch_numpy_compat(self) -> None:
         """Check that torch and numpy versions are compatible."""
         try:
@@ -139,7 +165,7 @@ class SpeakerDiarizer:
 
         self._pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
-            use_auth_token=token,
+            token=token,
         )
 
         if device != "cpu":
@@ -208,6 +234,24 @@ class SpeakerDiarizer:
                 pass
 
             logger.info("Diarization model unloaded")
+
+
+def check_diarization_ready() -> tuple[bool, str]:
+    """Check if diarization prerequisites are met.
+
+    Returns:
+        (ok, message) tuple. ok=True if ready, False with error message if not.
+    """
+    try:
+        diarizer = SpeakerDiarizer()
+        diarizer.validate_prerequisites()
+        return True, "Diarization prerequisites OK"
+    except ImportError as e:
+        return False, str(e)
+    except ValueError as e:
+        return False, str(e)
+    except RuntimeError as e:
+        return False, str(e)
 
 
 def assign_speakers(

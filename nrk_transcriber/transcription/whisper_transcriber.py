@@ -341,9 +341,13 @@ class WhisperTranscriber:
         # Run diarization if requested
         speaker_segments = None
         if diarize:
-            speaker_segments = await self._run_diarization(
-                audio_path, loop, diarizer
-            )
+            try:
+                speaker_segments = await self._run_diarization(
+                    audio_path, loop, diarizer
+                )
+            except Exception as e:
+                logger.error(f"Diarization failed, continuing without speaker labels: {e}")
+                speaker_segments = None
 
         processing_time = (datetime.now() - start_time).total_seconds()
 
