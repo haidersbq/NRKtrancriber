@@ -6,8 +6,12 @@ to transcription segments.
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional, Union
+
+# Prevent OpenMP crash when multiple libraries (torch, ctranslate2) each bundle libiomp5
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +72,6 @@ class SpeakerDiarizer:
         if self.hf_token:
             return self.hf_token
 
-        import os
         token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
         if not token:
             raise ValueError(

@@ -7,11 +7,15 @@ Optimized for Norwegian language transcription.
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Union
 import json
+
+# Prevent OpenMP crash when multiple libraries (torch, ctranslate2) each bundle libiomp5
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 logger = logging.getLogger(__name__)
 
