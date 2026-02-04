@@ -141,6 +141,54 @@ class SpeakerDiarizer:
         except ImportError:
             pass
 
+    @staticmethod
+    def _patch_hf_hub_auth():
+        """Patch pyannote modules so ``use_auth_token`` is translated to ``token``.
+
+        pyannote.audio 3.x does ``from huggingface_hub import hf_hub_download``
+        and calls it with the now-removed ``use_auth_token`` kwarg.  Because
+        pyannote holds a direct reference (not ``huggingface_hub.hf_hub_download``),
+        we must patch the name inside each pyannote module that imported it.
+
+        Returns a callable that restores the original references.
+        """
+        import functools
+        import sys
+
+        originals: list[tuple] = []  # (module, attr_name, original_fn)
+
+        def _wrap(fn):
+            @functools.wraps(fn)
+            def wrapper(*args, **kwargs):
+                if "use_auth_token" in kwargs:
+                    kwargs.setdefault("token", kwargs.pop("use_auth_token"))
+                return fn(*args, **kwargs)
+            return wrapper
+
+        # Patch hf_hub_download/model_info everywhere they appear:
+        # 1) In huggingface_hub itself (catches future imports during from_pretrained)
+        # 2) In every already-loaded pyannote module (they hold direct references)
+        import huggingface_hub
+        targets = [(huggingface_hub, ("hf_hub_download", "model_info"))]
+        for mod_name, mod in list(sys.modules.items()):
+            if mod is None or not mod_name.startswith("pyannote"):
+                continue
+            targets.append((mod, ("hf_hub_download", "model_info")))
+
+        for mod, attrs in targets:
+            for attr in attrs:
+                fn = getattr(mod, attr, None)
+                if fn is None or not callable(fn):
+                    continue
+                originals.append((mod, attr, fn))
+                setattr(mod, attr, _wrap(fn))
+
+        def _unpatch():
+            for mod, attr, orig in originals:
+                setattr(mod, attr, orig)
+
+        return _unpatch
+
     def load_model(self) -> None:
         """Load the pyannote diarization pipeline."""
         if self._loaded:
@@ -163,10 +211,16 @@ class SpeakerDiarizer:
 
         logger.info(f"Loading pyannote diarization pipeline on {device}")
 
-        self._pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            token=token,
-        )
+        # pyannote 3.x passes the removed `use_auth_token` kwarg to
+        # huggingface_hub internals.  Patch it to translate to `token`.
+        unpatch = self._patch_hf_hub_auth()
+        try:
+            self._pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                use_auth_token=token,
+            )
+        finally:
+            unpatch()
 
         if device != "cpu":
             self._pipeline.to(torch.device(device))

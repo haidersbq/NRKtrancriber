@@ -54,14 +54,16 @@ youtube = [
     "yt-dlp>=2024.0.0",
 ]
 diarize = [
-    "pyannote.audio>=4.0.0",
+    "pyannote.audio>=3.1.0,<4",
     "torch>=2.0.0",
+    "huggingface_hub>=0.20",
     "numpy<2; platform_machine == 'x86_64' and sys_platform == 'darwin'",
 ]
 all = [
     "yt-dlp>=2024.0.0",
-    "pyannote.audio>=4.0.0",
+    "pyannote.audio>=3.1.0,<4",
     "torch>=2.0.0",
+    "huggingface_hub>=0.20",
     "numpy<2; platform_machine == 'x86_64' and sys_platform == 'darwin'",
 ]
 
