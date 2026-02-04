@@ -257,6 +257,7 @@ class NRKTranscriber:
         audio_path: Path,
         channel_id: str = "file",
         language: Optional[str] = None,
+        diarize: bool = False,
     ) -> TranscriptionResult:
         """
         Transcribe a local audio file.
@@ -265,6 +266,7 @@ class NRKTranscriber:
             audio_path: Path to the audio file
             channel_id: Channel ID to associate with the transcription
             language: Optional language override (e.g., 'no', 'en', 'sv')
+            diarize: Whether to run speaker diarization
 
         Returns:
             TranscriptionResult
@@ -283,6 +285,7 @@ class NRKTranscriber:
         result = await self._transcriber.transcribe(
             audio_path=audio_path,
             channel_id=channel_id,
+            diarize=diarize,
         )
 
         # Save and export

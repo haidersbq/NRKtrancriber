@@ -38,10 +38,11 @@ class TranscriptionSegment:
     avg_logprob: float = 0.0
     compression_ratio: float = 0.0
     no_speech_prob: float = 0.0
+    speaker: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Convert segment to dictionary."""
-        return {
+        d = {
             "id": self.id,
             "text": self.text,
             "start": self.start,
@@ -54,6 +55,9 @@ class TranscriptionSegment:
             "compression_ratio": self.compression_ratio,
             "no_speech_prob": self.no_speech_prob,
         }
+        if self.speaker is not None:
+            d["speaker"] = self.speaker
+        return d
 
 
 @dataclass
@@ -90,6 +94,28 @@ class TranscriptionResult:
         """Convert result to JSON string."""
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
 
+    @property
+    def has_speakers(self) -> bool:
+        """Check if any segments have speaker labels."""
+        return any(s.speaker is not None for s in self.segments)
+
+    def to_speaker_text(self) -> str:
+        """Format text with speaker labels, grouping consecutive segments by speaker."""
+        if not self.has_speakers:
+            return self.text
+
+        lines = []
+        current_speaker = None
+
+        for segment in self.segments:
+            speaker = segment.speaker or "Unknown"
+            if speaker != current_speaker:
+                current_speaker = speaker
+                lines.append(f"\n[{speaker}]")
+            lines.append(segment.text.strip())
+
+        return "\n".join(lines).strip()
+
     def to_srt(self, offset_time: Optional[datetime] = None) -> str:
         """
         Convert result to SRT subtitle format.
@@ -105,7 +131,10 @@ class TranscriptionResult:
 
             lines.append(str(i))
             lines.append(f"{start} --> {end}")
-            lines.append(segment.text.strip())
+            text = segment.text.strip()
+            if segment.speaker:
+                text = f"[{segment.speaker}] {text}"
+            lines.append(text)
             lines.append("")
 
         return "\n".join(lines)
@@ -119,7 +148,10 @@ class TranscriptionResult:
             end = self._format_vtt_time(segment.end)
 
             lines.append(f"{start} --> {end}")
-            lines.append(segment.text.strip())
+            text = segment.text.strip()
+            if segment.speaker:
+                text = f"<v {segment.speaker}>{text}"
+            lines.append(text)
             lines.append("")
 
         return "\n".join(lines)
@@ -268,6 +300,8 @@ class WhisperTranscriber:
         channel_id: str = "unknown",
         audio_start_time: Optional[datetime] = None,
         audio_end_time: Optional[datetime] = None,
+        diarize: bool = False,
+        diarizer=None,
     ) -> TranscriptionResult:
         """
         Transcribe an audio file.
@@ -277,6 +311,8 @@ class WhisperTranscriber:
             channel_id: ID of the channel this audio is from
             audio_start_time: When the audio recording started
             audio_end_time: When the audio recording ended
+            diarize: Whether to run speaker diarization
+            diarizer: Optional pre-loaded SpeakerDiarizer instance
 
         Returns:
             TranscriptionResult with the transcribed text and metadata
@@ -298,6 +334,13 @@ class WhisperTranscriber:
             str(audio_path),
         )
 
+        # Run diarization if requested
+        speaker_segments = None
+        if diarize:
+            speaker_segments = await self._run_diarization(
+                audio_path, loop, diarizer
+            )
+
         processing_time = (datetime.now() - start_time).total_seconds()
 
         # Build transcription result
@@ -305,6 +348,13 @@ class WhisperTranscriber:
             audio_start_time = datetime.now()
         if audio_end_time is None:
             audio_end_time = audio_start_time + timedelta(seconds=result["duration"])
+
+        # Assign speakers to segments if diarization was run
+        if speaker_segments is not None:
+            from .diarizer import assign_speakers
+            result["segments"] = assign_speakers(
+                result["segments"], speaker_segments
+            )
 
         segments = []
         for i, seg in enumerate(result["segments"]):
@@ -327,6 +377,7 @@ class WhisperTranscriber:
                 avg_logprob=seg.get("avg_logprob", 0),
                 compression_ratio=seg.get("compression_ratio", 0),
                 no_speech_prob=seg.get("no_speech_prob", 0),
+                speaker=seg.get("speaker"),
             ))
 
         return TranscriptionResult(
@@ -341,6 +392,21 @@ class WhisperTranscriber:
             duration_seconds=result["duration"],
             processing_time_seconds=processing_time,
         )
+
+    async def _run_diarization(self, audio_path, loop, diarizer=None):
+        """Run speaker diarization on audio file."""
+        from .diarizer import SpeakerDiarizer
+
+        if diarizer is None:
+            diarizer = SpeakerDiarizer()
+
+        if not diarizer._loaded:
+            await loop.run_in_executor(None, diarizer.load_model)
+
+        speaker_segments = await loop.run_in_executor(
+            None, diarizer.diarize, audio_path
+        )
+        return speaker_segments
 
     def _transcribe_sync(self, audio_path: str) -> dict:
         """Synchronous transcription method."""

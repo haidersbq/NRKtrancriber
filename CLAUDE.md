@@ -65,6 +65,9 @@ nrk-transcriber download "URL" --model small
 
 # Override language detection
 nrk-transcriber download "URL" --language en
+
+# Enable speaker diarization (identify who spoke when)
+nrk-transcriber download "URL" --diarize --model small
 ```
 
 ### Live Stream Transcription
@@ -85,6 +88,9 @@ nrk-transcriber channels
 
 # Transcribe local audio file
 nrk-transcriber file audio.wav --model small
+
+# Transcribe with speaker identification
+nrk-transcriber file audio.wav --model small --diarize
 
 # View transcription history
 nrk-transcriber history --limit 10
@@ -117,7 +123,8 @@ nrk_transcriber/
 │   ├── capture.py         # Live stream capture via ffmpeg
 │   └── downloader.py      # On-demand content download (ffmpeg + yt-dlp)
 ├── transcription/
-│   └── whisper_transcriber.py  # Whisper integration (faster-whisper)
+│   ├── whisper_transcriber.py  # Whisper integration (faster-whisper)
+│   └── diarizer.py             # Speaker diarization (pyannote.audio)
 ├── storage/
 │   ├── database.py        # SQLite storage
 │   └── exporter.py        # Export to TXT/JSON/SRT/VTT/CSV
@@ -129,13 +136,14 @@ nrk_transcriber/
 
 | File | Purpose |
 |------|---------|
-| `cli.py` | Entry point, defines `download`, `capture`, `providers` commands |
+| `cli.py` | Entry point, defines `download`, `transcribe`, `providers` commands |
 | `providers/base.py` | BaseProvider interface, MediaProgram dataclass |
 | `providers/nrk.py` | NRK-specific API client |
 | `providers/youtube.py` | YouTube via yt-dlp |
 | `providers/podcast.py` | Podcast RSS feed parser |
 | `providers/direct.py` | Direct audio URL handler |
 | `whisper_transcriber.py` | Loads Whisper models, transcribes audio |
+| `diarizer.py` | Speaker diarization via pyannote.audio |
 | `downloader.py` | Downloads audio (ffmpeg + yt-dlp) |
 | `config/channels.yaml` | NRK radio channel configurations |
 
@@ -163,6 +171,52 @@ The `#t=14m19s` fragment specifies start time (14 minutes 19 seconds).
 
 For Norwegian content, `small` or `medium` recommended.
 
+## Speaker Diarization
+
+The `--diarize` flag enables speaker identification — labeling "who spoke when" in the transcript.
+
+### Setup
+
+1. Install the diarization dependencies:
+   ```bash
+   pip install -e ".[diarize]"
+   ```
+
+2. Get a HuggingFace token (free) at https://huggingface.co/settings/tokens
+
+3. Accept the pyannote model terms at https://huggingface.co/pyannote/speaker-diarization-3.1
+
+4. Set your token:
+   ```bash
+   export HF_TOKEN="hf_your_token_here"
+   ```
+
+### Usage
+
+```bash
+# Transcribe with speaker labels
+nrk-transcriber download "URL" --diarize --model small
+
+# Local file with diarization
+nrk-transcriber file interview.wav --diarize --model small
+```
+
+### Output with speakers
+
+Plain text output groups consecutive segments by speaker:
+```
+[SPEAKER_00]
+Velkommen til programmet. I dag skal vi snakke om...
+
+[SPEAKER_01]
+Takk for invitasjonen. Ja, det er et viktig tema...
+
+[SPEAKER_00]
+Kan du fortelle oss mer om bakgrunnen?
+```
+
+SRT/VTT subtitle files include speaker labels per segment.
+
 ## Output
 
 Transcripts saved to `output/transcripts/{episode}/{date}/` in:
@@ -179,12 +233,14 @@ Database at `output/transcriptions.db`.
 - **faster-whisper**: Primary transcription engine (CTranslate2-based)
 - **ffmpeg**: Required for audio capture/conversion (install via `brew install ffmpeg`)
 - **yt-dlp**: Required for YouTube support (`pip install yt-dlp`)
+- **pyannote.audio**: Required for speaker diarization (`pip install pyannote.audio`)
 - **Python 3.10+**: Required
 
 ### Optional Extras
 ```bash
-pip install -e ".[youtube]"  # YouTube support (yt-dlp)
-pip install -e ".[all]"      # All optional features
+pip install -e ".[youtube]"   # YouTube support (yt-dlp)
+pip install -e ".[diarize]"   # Speaker diarization (pyannote.audio + torch)
+pip install -e ".[all]"       # All optional features
 ```
 
 ## Development
@@ -250,5 +306,5 @@ from . import youtube  # Registers automatically via decorator
 - [ ] SVT/DR Nordic broadcasters
 - [ ] `--end-time` option for precise segment selection
 - [ ] Search command across transcripts
-- [ ] Speaker diarization
+- [x] Speaker diarization (via pyannote.audio)
 - [ ] Auto-translate to English

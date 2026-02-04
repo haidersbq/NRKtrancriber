@@ -12,7 +12,6 @@ from typing import Optional
 import click
 from rich.console import Console
 from rich.table import Table
-from rich.live import Live
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
@@ -219,8 +218,13 @@ def transcribe(
     default=["txt", "json"],
     help="Output format(s)",
 )
+@click.option(
+    "--diarize",
+    is_flag=True,
+    help="Enable speaker diarization (identify who spoke when). Requires pyannote.audio and HF_TOKEN.",
+)
 @click.pass_context
-def file(ctx, audio_file: Path, model: str, output: Optional[Path], format: tuple):
+def file(ctx, audio_file: Path, model: str, output: Optional[Path], format: tuple, diarize: bool):
     """
     Transcribe a local audio file.
 
@@ -232,6 +236,8 @@ def file(ctx, audio_file: Path, model: str, output: Optional[Path], format: tupl
 
     console.print(f"[bold]Transcribing:[/bold] {audio_file}")
     console.print(f"[bold]Model:[/bold] {model}")
+    if diarize:
+        console.print(f"[bold]Diarization:[/bold] enabled")
 
     async def run():
         transcriber = NRKTranscriber(config=config)
@@ -245,11 +251,17 @@ def file(ctx, audio_file: Path, model: str, output: Optional[Path], format: tupl
                 TimeElapsedColumn(),
                 console=console,
             ) as progress:
-                progress.add_task("Loading model and transcribing...", total=None)
-                result = await transcriber.transcribe_file(audio_file)
+                desc = "Loading model and transcribing..."
+                if diarize:
+                    desc = "Loading models, transcribing + diarizing..."
+                progress.add_task(desc, total=None)
+                result = await transcriber.transcribe_file(audio_file, diarize=diarize)
 
             console.print("\n[green]━━━ Transcription ━━━[/green]")
-            console.print(result.text)
+            if result.has_speakers:
+                console.print(result.to_speaker_text())
+            else:
+                console.print(result.text)
 
             console.print(f"\n[bold]Language:[/bold] {result.language} ({result.language_probability:.1%})")
             console.print(f"[bold]Duration:[/bold] {result.duration_seconds:.1f}s")
@@ -454,6 +466,11 @@ def providers(ctx):
     "-l",
     help="Override language detection (e.g., 'en', 'no', 'sv')",
 )
+@click.option(
+    "--diarize",
+    is_flag=True,
+    help="Enable speaker diarization (identify who spoke when). Requires pyannote.audio and HF_TOKEN.",
+)
 @click.pass_context
 def download(
     ctx,
@@ -464,6 +481,7 @@ def download(
     output_dir: Optional[Path],
     keep_audio: bool,
     language: Optional[str],
+    diarize: bool,
 ):
     """
     Download and transcribe media from any supported source.
@@ -546,6 +564,7 @@ def download(
             info_lines.append(f"[bold]Transcribe:[/bold] {transcribe_duration_str}")
         info_lines.extend([
             f"[bold]Model:[/bold] {model}",
+            f"[bold]Diarization:[/bold] {'enabled' if diarize else 'disabled'}",
             f"[bold]Output:[/bold] {config.storage.transcripts_dir}",
         ])
 
@@ -578,19 +597,27 @@ def download(
                     duration=duration_seconds,
                 )
 
-                progress.update(task, description="Transcribing...")
-
                 # Transcribe (with language override if specified)
                 transcribe_language = language or program.language or api.DEFAULT_LANGUAGE
+
+                if diarize:
+                    progress.update(task, description="Transcribing + diarizing speakers...")
+                else:
+                    progress.update(task, description="Transcribing...")
+
                 result = await transcriber.transcribe_file(
                     audio.file_path,
                     channel_id=program.program_id,
                     language=transcribe_language,
+                    diarize=diarize,
                 )
 
             # Print transcription
             console.print("\n[green]━━━ Transcription ━━━[/green]")
-            console.print(result.text)
+            if result.has_speakers:
+                console.print(result.to_speaker_text())
+            else:
+                console.print(result.text)
 
             console.print(f"\n[bold]Duration:[/bold] {result.duration_seconds:.1f}s")
             console.print(f"[bold]Processing time:[/bold] {result.processing_time_seconds:.1f}s")
