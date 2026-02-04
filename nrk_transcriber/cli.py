@@ -4,6 +4,13 @@ Command-line interface for Media Transcriber.
 Supports multiple media providers including NRK, direct URLs, and more.
 """
 
+import os
+
+# Must be set before any library imports — ctranslate2 (faster-whisper) and torch
+# (pyannote) each bundle their own copy of libiomp5 (OpenMP). When both load in the
+# same process, macOS aborts unless this flag is set.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import asyncio
 import sys
 from pathlib import Path
