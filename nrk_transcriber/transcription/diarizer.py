@@ -125,19 +125,16 @@ class SpeakerDiarizer:
         self._check_torch_numpy_compat()
 
     @staticmethod
-    def _auth_kwarg(token: str) -> dict:
-        """Return the correct auth keyword for the installed pyannote version.
+    def _login_hf(token: str) -> None:
+        """Log in to HuggingFace Hub so the token is available globally.
 
-        Older pyannote.audio uses ``use_auth_token``, newer versions use ``token``.
-        Try the new name first, fall back to the old one.
+        This avoids passing ``token`` or ``use_auth_token`` as a keyword
+        argument to ``Pipeline.from_pretrained``, which breaks when the
+        installed pyannote.audio and huggingface_hub versions disagree on
+        the parameter name.
         """
-        import inspect
-        from pyannote.audio import Pipeline
-
-        sig = inspect.signature(Pipeline.from_pretrained)
-        if "token" in sig.parameters:
-            return {"token": token}
-        return {"use_auth_token": token}
+        from huggingface_hub import login
+        login(token=token, add_to_git_credential=False)
 
     def _check_torch_numpy_compat(self) -> None:
         """Check that torch and numpy versions are compatible."""
@@ -178,9 +175,12 @@ class SpeakerDiarizer:
 
         logger.info(f"Loading pyannote diarization pipeline on {device}")
 
+        # Log in globally so Pipeline.from_pretrained picks up the token
+        # without us having to guess the correct keyword argument name.
+        self._login_hf(token)
+
         self._pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
-            **self._auth_kwarg(token),
         )
 
         if device != "cpu":
