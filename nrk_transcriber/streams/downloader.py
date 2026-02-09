@@ -60,12 +60,13 @@ class NRKDownloader:
         cmd = [
             "ffmpeg",
             "-y",  # Overwrite
-            "-i", audio_url,
         ]
 
-        # Add start time if specified
+        # Place -ss BEFORE -i for input seeking (fast, works with HTTP)
         if start_time:
             cmd.extend(["-ss", str(start_time)])
+
+        cmd.extend(["-i", audio_url])
 
         # Add duration if specified
         if duration:
