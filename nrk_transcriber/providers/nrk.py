@@ -87,13 +87,17 @@ class NRKProvider(BaseProvider):
             content_id = path_parts[-1]
 
         # Podcast: /podkast/<podcast>/<episode_id>
+        # or:      /podkast/<podcast>/sesong/<season>/<episode_id>
         elif "podkast" in path_parts:
             content_type = "podcast"
             idx = path_parts.index("podkast")
             if idx + 1 < len(path_parts):
                 series_id = path_parts[idx + 1]
-            if idx + 2 < len(path_parts):
-                content_id = path_parts[idx + 2]
+            # Episode ID is always the last path segment
+            content_id = path_parts[-1]
+            # If content_id is the series name itself, there's no episode
+            if content_id == series_id:
+                content_id = ""
 
         return ParsedURL(
             provider=self.PROVIDER_ID,
@@ -116,17 +120,29 @@ class NRKProvider(BaseProvider):
         """
         # Parse URL if given
         timestamp = None
+        content_type = "on_demand"
+        series_id = None
         if url_or_id.startswith("http"):
             parsed = self.parse_url(url_or_id)
             program_id = parsed.content_id
             timestamp = parsed.timestamp_seconds
+            content_type = parsed.content_type
+            series_id = parsed.series_id
             original_url = url_or_id
         else:
             program_id = url_or_id
             original_url = None
 
+        # For podcast series URLs without episode ID, fetch latest episode
+        if content_type == "podcast" and not program_id and series_id:
+            program_id = self._get_latest_podcast_episode_id(series_id)
+
         if not program_id:
             raise ValueError(f"Could not extract program ID from: {url_or_id}")
+
+        # Use podcast-specific API for podcast content
+        if content_type == "podcast":
+            return self._get_podcast_program(program_id, series_id, timestamp, original_url)
 
         # Get manifest for stream URL
         manifest = self._get_playback_manifest(program_id)
@@ -169,6 +185,65 @@ class NRKProvider(BaseProvider):
             original_url=original_url,
             start_time_seconds=timestamp,
         )
+
+    def _get_podcast_program(
+        self, episode_id: str, series_id: Optional[str],
+        timestamp: Optional[int], original_url: Optional[str],
+    ) -> MediaProgram:
+        """Get program info using the podcast-specific NRK API endpoints."""
+        # Podcast manifest uses /playback/manifest/podcast/{episode_id}
+        manifest_url = f"{NRK_PSAPI_BASE}/playback/manifest/podcast/{episode_id}"
+        logger.debug(f"Fetching podcast manifest: {manifest_url}")
+        response = self.session.get(manifest_url)
+        response.raise_for_status()
+        manifest = response.json()
+
+        audio_url = self._extract_audio_url(manifest)
+        if not audio_url:
+            raise ValueError(f"Could not find audio URL for podcast episode: {episode_id}")
+
+        # Get metadata from the metadata endpoint
+        metadata = {}
+        try:
+            meta_url = f"{NRK_PSAPI_BASE}/playback/metadata/podcast/{episode_id}"
+            logger.debug(f"Fetching podcast metadata: {meta_url}")
+            resp = self.session.get(meta_url)
+            resp.raise_for_status()
+            metadata = resp.json()
+        except Exception as e:
+            logger.warning(f"Could not fetch podcast metadata: {e}")
+
+        preplay = metadata.get("preplay", {})
+        titles = preplay.get("titles", {})
+        duration_str = metadata.get("duration", "PT0S")
+        duration_seconds = self._parse_duration_field(duration_str)
+
+        return MediaProgram(
+            program_id=episode_id,
+            title=titles.get("title", episode_id),
+            series_title=titles.get("subtitle") or series_id,
+            description=preplay.get("description", ""),
+            duration_seconds=duration_seconds,
+            audio_url=audio_url,
+            provider=self.PROVIDER_ID,
+            language=self.DEFAULT_LANGUAGE,
+            original_url=original_url,
+            start_time_seconds=timestamp,
+        )
+
+    def _get_latest_podcast_episode_id(self, series_id: str) -> str:
+        """Fetch the latest episode ID for a podcast series."""
+        url = f"{NRK_RADIO_API}/catalog/podcast/{series_id}/episodes?page=1&pageSize=1&sort=desc"
+        logger.debug(f"Fetching latest podcast episode: {url}")
+        response = self.session.get(url)
+        response.raise_for_status()
+        data = response.json()
+
+        episodes = data.get("_embedded", {}).get("episodes", [])
+        if not episodes:
+            raise ValueError(f"No episodes found for podcast series: {series_id}")
+
+        return episodes[0]["episodeId"]
 
     def get_live_stream_url(self, channel_id: str) -> str:
         """Get URL for a live NRK radio stream."""
